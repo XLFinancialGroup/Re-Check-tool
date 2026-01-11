@@ -2,12 +2,13 @@ import streamlit as st
 import os
 import io
 from reportlab.lib.pagesizes import A4
+from reportlab.lib import colors
 from reportlab.pdfgen import canvas
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 
 # ==========================================
-# 1. Page Configuration
+# 1. 页面配置
 # ==========================================
 st.set_page_config(
     page_title="Actuarial Governance Re-Check", 
@@ -15,13 +16,14 @@ st.set_page_config(
     layout="wide"
 )
 
-# Initialize Session State for persistence
+# 初始化 Session State
 if 'show_results' not in st.session_state:
     st.session_state.show_results = False
 if 'total_score' not in st.session_state:
     st.session_state.total_score = 0
+if 'user_selections' not in st.session_state:
+    st.session_state.user_selections = {} # 新增：用于存储用户的具体选择
 
-# Logo Helper
 def render_logo():
     if os.path.exists("logo.png"):
         st.sidebar.image("logo.png", use_container_width=True)
@@ -29,7 +31,7 @@ def render_logo():
         st.sidebar.markdown("### 🛡️ Xu Consulting Group")
 
 # ==========================================
-# 2. Text Database
+# 2. 文本数据库 (保持不变)
 # ==========================================
 UI_TEXT = {
     'English': {
@@ -43,7 +45,9 @@ UI_TEXT = {
         'score_label': "Governance Score",
         'risk_label': "Risk Rating",
         'contact': "Book Expert Review",
-        'download': "📥 Download PDF Report"
+        'download': "📥 Download Detailed Report (PDF)",
+        'pdf_title': "Governance Diagnostic Report",
+        'detail_section': "Diagnostic Details"
     },
     '简体中文': {
         'title': "再保险精算合规体检系统",
@@ -56,7 +60,9 @@ UI_TEXT = {
         'score_label': "合规治理得分",
         'risk_label': "风险评级",
         'contact': "预约专家解读",
-        'download': "📥 下载 PDF 报告"
+        'download': "📥 下载详细诊断报告 (PDF)",
+        'pdf_title': "精算治理诊断报告",
+        'detail_section': "诊断明细"
     },
     '繁體中文': {
         'title': "再保險精算合規體檢系統",
@@ -69,14 +75,16 @@ UI_TEXT = {
         'score_label': "合規治理得分",
         'risk_label': "風險評級",
         'contact': "預約專家解讀",
-        'download': "📥 下載 PDF 報告"
+        'download': "📥 下載詳細診斷報告 (PDF)",
+        'pdf_title': "精算治理診斷報告",
+        'detail_section': "診斷明細"
     }
 }
 
 QUESTIONS = [
     # --- Module A ---
     {"id": "DQ1", "scores": [0, 5, 10], "text": {"English": "Data Automation Level", "简体中文": "数据自动化程度", "繁體中文": "數據自動化程度"}, 
-     "options": {"English": ["Manual", "Semi-Auto", "Fully Auto"], "简体中文": ["手动", "半自动", "全自动"], "繁體中文": ["手動", "半自動", "全自動"]}},
+     "options": {"English": ["Manual (High Risk)", "Semi-Auto", "Fully Auto"], "简体中文": ["手动 (高风险)", "半自动", "全自动"], "繁體中文": ["手動 (高風險)", "半自動", "全自動"]}},
     {"id": "DQ2", "scores": [0, 5, 10], "text": {"English": "Cedant Data Validation", "简体中文": "分出方数据验证", "繁體中文": "分出方數據驗證"}, 
      "options": {"English": ["Passive", "Reactive", "Proactive"], "简体中文": ["被动", "反应式", "主动式"], "繁體中文": ["被動", "反應式", "主動式"]}},
     {"id": "DQ3", "scores": [0, 5, 10], "text": {"English": "Data Lineage Map", "简体中文": "数据血缘地图", "繁體中文": "數據血緣地圖"}, 
@@ -100,69 +108,131 @@ QUESTIONS = [
 ]
 
 # ==========================================
-# 3. PDF Generator Function
+# 3. 升级版 PDF 生成器 (支持多页和表格化布局)
 # ==========================================
-def generate_pdf_report(score, risk_text, lang_code):
+def generate_detailed_pdf(score, risk_text, lang_code, user_selections):
     buffer = io.BytesIO()
     c = canvas.Canvas(buffer, pagesize=A4)
     width, height = A4
     
-    # Default Font
+    # --- 字体处理 ---
     selected_font = "Helvetica"
+    selected_font_bold = "Helvetica-Bold"
     font_file = None
+    custom_font_name = "CustomFont"
 
-    # Determine Font file based on language
     if lang_code == "简体中文":
         font_file = "font_sc.ttf"
-        custom_font_name = "CustomSC"
     elif lang_code == "繁體中文":
         font_file = "font_tc.ttf"
-        custom_font_name = "CustomTC"
     
-    # Try to register font if file exists
-    used_lang_mode = "English" # Default to English mode if fonts fail
+    used_lang_mode = "English" 
     if font_file and os.path.exists(font_file):
         try:
             pdfmetrics.registerFont(TTFont(custom_font_name, font_file))
             selected_font = custom_font_name
+            selected_font_bold = custom_font_name # 简化处理，粗体也用如同一个字体
             used_lang_mode = lang_code
         except Exception:
-            pass # Fail silently back to Helvetica
+            pass 
 
-    # --- Draw Content ---
-    c.setFont(selected_font, 24)
-    
-    # Title
-    if used_lang_mode == "简体中文":
-        title = "再保险精算合规体检报告"
-    elif used_lang_mode == "繁體中文":
-        title = "再保險精算合規體檢報告"
-    else:
-        title = "Actuarial Governance Re-Check"
-    
-    c.drawString(50, height - 80, title)
-    c.line(50, height - 100, 550, height - 100)
+    # --- 辅助函数：绘制页眉 ---
+    def draw_header(c, y_pos):
+        # 顶部深色条
+        c.setFillColorRGB(0.1, 0.2, 0.4) # 深蓝色
+        c.rect(0, height - 80, width, 80, fill=1, stroke=0)
+        
+        c.setFillColor(colors.white)
+        c.setFont(selected_font_bold, 24)
+        
+        title = UI_TEXT[lang_code]['pdf_title'] if used_lang_mode != "English" else UI_TEXT['English']['pdf_title']
+        c.drawString(40, height - 50, title)
+        
+        c.setFont(selected_font, 10)
+        c.drawString(40, height - 70, "Xu Consulting Group | Confidential Assessment")
+        
+        # 恢复黑色字体
+        c.setFillColor(colors.black)
+        return height - 120
 
-    # Score
-    c.setFont(selected_font, 18)
-    c.drawString(50, height - 150, f"Score: {score} / 100")
-    
-    # Risk (Handle potential encoding issues if font missing)
-    if used_lang_mode == "English" and lang_code != "English":
-         c.drawString(50, height - 180, f"Risk Rating: {score} (Font missing, showing numeric)")
-    else:
-         c.drawString(50, height - 180, f"Risk Rating: {risk_text}")
+    # --- 开始绘制 ---
+    y = draw_header(c, height)
 
-    # Footer
-    c.setFont("Helvetica", 10)
-    c.drawString(50, 50, "Powered by Xu Consulting Group | Confidential")
+    # 1. 摘要部分
+    c.setFont(selected_font_bold, 16)
+    c.drawString(40, y, f"Executive Summary (摘要)")
+    y -= 30
+    
+    c.setFont(selected_font, 12)
+    c.drawString(40, y, f"Total Governance Score: {score} / 100")
+    c.drawString(300, y, f"Risk Rating: {risk_text}")
+    
+    # 绘制简单的进度条可视化
+    y -= 30
+    c.setStrokeColor(colors.grey)
+    c.rect(40, y, 400, 15, stroke=1, fill=0) # 背景框
+    
+    bar_color = colors.green if score >= 80 else (colors.orange if score >= 50 else colors.red)
+    c.setFillColor(bar_color)
+    c.rect(40, y, 400 * (score/100), 15, stroke=0, fill=1) # 进度条
+    
+    y -= 40
+    c.setFillColor(colors.black)
+    c.line(40, y, 550, y) # 分割线
+    y -= 30
+
+    # 2. 详细问答部分
+    c.setFont(selected_font_bold, 14)
+    section_title = UI_TEXT[lang_code]['detail_section'] if used_lang_mode != "English" else UI_TEXT['English']['detail_section']
+    c.drawString(40, y, section_title)
+    y -= 30
+
+    c.setFont(selected_font, 10)
+    
+    # 遍历所有问题并打印
+    for index, q in enumerate(QUESTIONS):
+        # 检查是否需要换页
+        if y < 80:
+            c.showPage() # 新建一页
+            y = draw_header(c, height) # 重新画页眉
+            c.setFont(selected_font, 10)
+
+        # 获取用户选择
+        user_sel_idx = user_selections.get(q['id'], 0) # 默认为0
+        sel_text = q['options'][lang_code][user_sel_idx]
+        score_val = q['scores'][user_sel_idx]
+        
+        # 问题标题
+        q_text = q['text'][lang_code]
+        c.setFont(selected_font_bold, 11)
+        c.drawString(40, y, f"Q{index+1}: {q_text}")
+        
+        # 用户回答
+        c.setFont(selected_font, 10)
+        # 如果分数低，用红色标记
+        if score_val == 0:
+            c.setFillColor(colors.red)
+        elif score_val == 5:
+            c.setFillColorRGB(0.8, 0.4, 0) # Orange-ish
+        else:
+            c.setFillColor(colors.black)
+            
+        c.drawString(60, y - 15, f"• Selected: {sel_text} (+{score_val} pts)")
+        
+        c.setFillColor(colors.black)
+        y -= 40 # 下移一行
+
+    # 底部版权
+    c.setFont("Helvetica", 9)
+    c.setFillColor(colors.grey)
+    c.drawString(40, 30, "Generated by Streamlit • Xu Consulting Group")
 
     c.save()
     buffer.seek(0)
     return buffer
 
 # ==========================================
-# 4. Main Interface Logic
+# 4. 主界面逻辑
 # ==========================================
 
 # --- Sidebar ---
@@ -178,42 +248,48 @@ st.caption(f"**Xu Consulting Group** | {t['subtitle']}")
 st.markdown("---")
 
 col_a, col_b = st.columns(2, gap="large")
-temp_score = 0
 
-# Left Col: Module A
+# 临时变量，用于本次运行计算
+current_run_score = 0
+current_run_selections = {}
+
+# 左栏：Module A
 with col_a:
     st.subheader(f"📂 {t['module_a']}")
     for q in QUESTIONS[:5]:
         st.markdown(f"**{q['text'][lang]}**")
+        # Radio 默认值逻辑可以优化，这里简化处理
         sel = st.radio(f"Label_{q['id']}", [0, 1, 2], format_func=lambda x: q['options'][lang][x], key=q['id'], label_visibility="collapsed", horizontal=True)
-        temp_score += q['scores'][sel]
+        current_run_score += q['scores'][sel]
+        current_run_selections[q['id']] = sel # 记录选择
         st.write("")
 
-# Right Col: Module B
+# 右栏：Module B
 with col_b:
     st.subheader(f"⚖️ {t['module_b']}")
     for q in QUESTIONS[5:]:
         st.markdown(f"**{q['text'][lang]}**")
         sel = st.radio(f"Label_{q['id']}", [0, 1, 2], format_func=lambda x: q['options'][lang][x], key=q['id'], label_visibility="collapsed", horizontal=True)
-        temp_score += q['scores'][sel]
+        current_run_score += q['scores'][sel]
+        current_run_selections[q['id']] = sel # 记录选择
         st.write("")
 
 st.markdown("---")
 
 # ==========================================
-# 5. Dashboard & PDF Trigger
+# 5. 结果与 PDF
 # ==========================================
 
 if st.button(t['calc_btn'], type="primary", use_container_width=True):
     st.session_state.show_results = True
-    st.session_state.total_score = temp_score
+    st.session_state.total_score = current_run_score
+    st.session_state.user_selections = current_run_selections # 保存用户的具体选项到 Session
 
 if st.session_state.show_results:
     final_score = st.session_state.total_score
     
     st.markdown(f"### 📈 {t['result_header']}")
     
-    # Risk Logic
     if final_score < 50:
         color = "red"
         risk_text = "HIGH RISK (高风险)" if lang == 'English' else "高风险 (High Risk)"
@@ -238,33 +314,31 @@ if st.session_state.show_results:
     
     st.markdown("---")
     
-    # Risk Commentary
     if color == "red":
         st.error(f"#### {risk_icon} Critical Attention Required")
-        if lang == "English":
-            st.write("Your governance structure shows significant gaps. **Process gaps are likely hidden.**")
-        else:
-            st.write("您的治理结构显示出重大漏洞。**流程缺陷可能非常隐蔽。**")
+        st.write(f"Risk Rating: {risk_text}")
     elif color == "orange":
         st.warning(f"#### {risk_icon} Operational Efficiency Warning")
-        if lang == "English":
-             st.write("Basic compliance met, but manual processes create operational risks.")
-        else:
-             st.write("已满足基本合规，但人工流程带来了操作风险。")
+        st.write(f"Risk Rating: {risk_text}")
     else:
         st.success(f"#### {risk_icon} Industry Leader")
-        st.write("Excellent baseline.")
+        st.write(f"Risk Rating: {risk_text}")
 
-    # Contact
     st.info(f"👉 **{t['contact']}:** James.Xu@xuconsultinggroup.com")
 
-    # --- PDF Download Button ---
-    pdf_data = generate_pdf_report(final_score, risk_text, lang)
+    # --- 生成详细版 PDF ---
+    # 传入 score, risk_text, lang, 以及最重要的 user_selections
+    pdf_data = generate_detailed_pdf(
+        final_score, 
+        risk_text, 
+        lang, 
+        st.session_state.user_selections
+    )
     
     st.download_button(
         label=t['download'],
         data=pdf_data,
-        file_name=f"Governance_Report_{final_score}.pdf",
+        file_name=f"Detailed_Report_{final_score}.pdf",
         mime="application/pdf",
-        type="secondary"
+        type="primary" # 样式改为主要按钮，更显眼
     )
