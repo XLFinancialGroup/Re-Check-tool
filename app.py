@@ -177,3 +177,110 @@ if st.button(t['calc_btn'], type="primary", use_container_width=True):
 
     # Contact Info Update
     st.info(f"👉 **{t['contact']}:** James.Xu@xuconsultinggroup.com")
+
+    # ==========================================
+    # 5. PDF 报告生成模块 (升级版：双语字体支持)
+    # ==========================================
+    import io
+    import os # 确保引入 os
+    from reportlab.lib.pagesizes import A4
+    from reportlab.pdfgen import canvas
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
+
+    def generate_pdf_report(score, risk_level, lang_code):
+        buffer = io.BytesIO()
+        c = canvas.Canvas(buffer, pagesize=A4)
+        width, height = A4
+
+        # --- 1. 智能字体选择逻辑 ---
+        # 默认使用英文 (Helvetica 是 PDF 内置字体，不需要文件)
+        selected_font = "Helvetica" 
+        font_file = None
+
+        if lang_code == "简体中文":
+            font_file = "font_sc.ttf"
+            selected_font = "CustomSC"
+        elif lang_code == "繁體中文":
+            font_file = "font_tc.ttf"
+            selected_font = "CustomTC"
+        
+        # --- 2. 尝试注册字体 ---
+        # 只有当不是英文，且字体文件真的存在于服务器上时，才注册
+        if font_file and os.path.exists(font_file):
+            try:
+                # 注册字体
+                pdfmetrics.registerFont(TTFont(selected_font, font_file))
+            except Exception as e:
+                # 如果注册失败（比如文件损坏），回退到英文
+                selected_font = "Helvetica"
+                print(f"Font loading error: {e}")
+        else:
+            # 如果是中文模式但找不到字体文件，强制回退到英文以防崩溃
+            if lang_code != "English":
+                selected_font = "Helvetica"
+
+        # --- 3. 绘制内容 ---
+        
+        # 标题
+        c.setFont(selected_font, 24)
+        # 注意：如果回退到了 Helvetica，中文标题会乱码，所以这里做一个安全检查
+        if selected_font == "Helvetica" and lang_code != "English":
+            c.drawString(50, height - 80, "Actuarial Governance Re-Check") # 强制显示英文标题
+            c.setFont("Helvetica", 10)
+            c.drawString(50, height - 100, "(Font file missing, displaying in English mode)")
+        else:
+            # 正常显示对应语言的标题
+            if lang_code == "English":
+                c.drawString(50, height - 80, "Actuarial Governance Re-Check")
+            elif lang_code == "简体中文":
+                c.drawString(50, height - 80, "再保险精算合规体检报告")
+            else:
+                c.drawString(50, height - 80, "再保險精算合規體檢報告")
+
+        c.line(50, height - 120, 550, height - 120)
+        
+        # 结果展示
+        c.setFont(selected_font, 18)
+        # 这里为了演示简单，我还是用英文 Label，你可以根据 lang_code 扩展这里的 if/else
+        c.drawString(50, height - 160, f"Total Score: {score} / 100")
+        c.drawString(50, height - 190, f"Risk Level: {risk_level}")
+
+        # 绘制建议
+        c.setFont(selected_font, 12)
+        y_position = height - 240
+        
+        if lang_code == "English":
+            c.drawString(50, y_position, "Expert Recommendations:")
+        else:
+            c.drawString(50, y_position, "专家建议 / 專家建議:")
+            
+        y_position -= 20
+        
+        # 简单的建议文案逻辑 (你可以把之前的中文文案放进来)
+        if score < 50:
+            if lang_code == "English":
+                rec_text = "- Critical: Immediate independent review required."
+            elif lang_code == "简体中文":
+                rec_text = "- 高风险：建议立即进行独立审查。"
+            else:
+                rec_text = "- 高風險：建議立即進行獨立審查。"
+        elif score < 80:
+            if lang_code == "English":
+                rec_text = "- Warning: Focus on automating audit trails."
+            elif lang_code == "简体中文":
+                rec_text = "- 警告：请重点关注审计追踪自动化。"
+            else:
+                rec_text = "- 警告：請重點關注審計追蹤自動化。"
+        else:
+            rec_text = "- Excellent / 优秀 / 優秀"
+            
+        c.drawString(70, y_position, rec_text)
+
+        # 底部版权
+        c.setFont(selected_font, 10)
+        c.drawString(50, 50, "Powered by Xu Consulting Group Corporation | Confidential")
+
+        c.save()
+        buffer.seek(0)
+        return buffer
