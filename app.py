@@ -28,7 +28,7 @@ def render_logo():
     if os.path.exists("logo.png"):
         st.sidebar.image("logo.png", use_container_width=True)
     else:
-        st.sidebar.markdown("### 🛡️ Xu Consulting Group")
+        st.sidebar.markdown("### 🛡️ Xu Consulting Group Corporation")
 
 # ==========================================
 # 2. 文本数据库 (保持不变)
