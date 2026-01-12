@@ -36,7 +36,7 @@ def render_logo():
 UI_TEXT = {
     'English': {
         'title': "Actuarial Governance Re-Check",
-        'subtitle': "Peak Re / Big4 Style Diagnostic Tool",
+        'subtitle': "Industry best practice benchmarking Diagnostic Tool",
         'lang_select': "Language / 语言",
         'module_a': "Module A: Data Quality & Lineage",
         'module_b': "Module B: Reserving & Governance",
